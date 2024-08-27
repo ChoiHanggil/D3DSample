@@ -44,7 +44,7 @@ ComPtr<ID3D11DeviceContext> gspDeviceContext;
 ComPtr<ID3D11Texture2D> gspRenderTarget{};
 ComPtr<ID3D11Texture2D> gspDepthStencil{};
 ComPtr<ID3D11RenderTargetView> gspRenderTargetView{};
-ComPtr<ID3D11RenderTargetView> gspDepthStencilView{};
+ComPtr<ID3D11DepthStencilView> gspDepthStencilView{};
 
 void InitD3D();
 void DestroyD3D();

@@ -13,11 +13,15 @@ using namespace Microsoft::WRL;
 
 const wchar_t CLASS_NAME[]{ L"MyClassName" };
 const wchar_t TiTLE_TEXT[]{ L"Direct3D Sample" };
-const int WINDOW_WIDTH{ 800 };
-const int WINDOW_HEIGHT{ 600 };
+int gScreenWidth{ 800 };
+int gScreenHeight{ 600 };
 
 HWND gHwnd{};
 HINSTANCE gInstance{};
+
+bool gMinimized{ false };
+bool gMaximized{ false };
+bool gResizing{ false };
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
@@ -33,22 +37,40 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 	// 렌더타겟
 	// 깊이스텐실 버퍼
 	// 
-
+	
 // MVC 패턴
 //
 
-ComPtr<IDXGISwapChain> gspSwapChain{}; //Interface DX GI(Graphic Infarastructure)
+// 모든 스위치 룰
+// 0. 해상도는 옵션으로 변경 - 변수
+// 0. 윈도우 배경색 칠하기 과정을 생략
+// 1. 스왑체인으이 속성 변경
+// 2. 게임 종료시에 반드시 전체화면 모드 해제 후 종료
+
+// 가변 해상도
+// 스왑체인
+// 렌더타겟(렌더타겟 뷰)
+// 깊이스텐실(깊이스텐실 뷰)
+// 뷰포트
+
+// 윈도우 창 크기 변경 메시지
+// WM_SIZE, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE
+// 크기 조절 제한, 메뉴 없음 사운드 띠리링 소리 제거
+
 ComPtr<ID3D11Device> gspDevice{};
 ComPtr<ID3D11DeviceContext> gspDeviceContext;
 
+//해상도가 바꾸면 전부다 새로 만들어야 된다
+ComPtr<IDXGISwapChain> gspSwapChain{}; //Interface DX GI(Graphic Infarastructure)
 ComPtr<ID3D11Texture2D> gspRenderTarget{};
 ComPtr<ID3D11Texture2D> gspDepthStencil{};
 ComPtr<ID3D11RenderTargetView> gspRenderTargetView{};
 ComPtr<ID3D11DepthStencilView> gspDepthStencilView{};
 
 void InitD3D();
+void OnResize();
 void DestroyD3D();
-
+void Render();
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPreInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd)
 {
@@ -58,7 +80,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPreInstance, _I
 	wc.lpszClassName = CLASS_NAME;
 	wc.hInstance = hInstance;
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW);
+	wc.hbrBackground = NULL;
 	wc.lpfnWndProc = WindowProc;
 	wc.cbSize = sizeof(WNDCLASSEX);
 
@@ -69,7 +91,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPreInstance, _I
 	}
 
 	gInstance = hInstance;
-	RECT wr{ 0,0,WINDOW_WIDTH, WINDOW_HEIGHT };
+	RECT wr{ 0,0,gScreenWidth, gScreenHeight };
 	AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
 	gHwnd = CreateWindowEx(
 		0,
@@ -110,6 +132,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPreInstance, _I
 				else
 				{
 					//GAMELOOP
+					Render();
 				}
 			}
 		}
@@ -121,29 +144,109 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
 {
 	switch (message)
 	{
+	case WM_PAINT:
+		if (gResizing)
+		{
+			Render();
+		}
+		else
+		{
+			PAINTSTRUCT ps;
+			BeginPaint(hwnd, &ps);
+			EndPaint(hwnd, &ps);
+		}
+		break;
+
+	case WM_ENTERSIZEMOVE:
+		gResizing = true;
+		break;
+
+	case WM_SIZE:
+		gScreenWidth = LOWORD(lParam);
+		gScreenHeight = HIWORD(lParam);
+		if (gspDevice)
+		{
+			if (wParam == SIZE_MINIMIZED)
+			{
+				gMinimized = true;
+				gMaximized = false;
+			}
+			else if (wParam == SIZE_MAXIMIZED)
+			{
+				gMaximized = true;
+				gMinimized = false;
+				OnResize();
+			}
+			else if (wParam == SIZE_RESTORED)
+			{
+				if (gMinimized)
+				{
+					gMinimized = false;
+					OnResize();
+				}
+				else if (gMaximized)
+				{
+					gMaximized = false;
+					OnResize();
+				}
+				else if (gResizing)
+				{
+
+				}
+				else
+				{
+					OnResize();
+				}
+			}
+		}
+		break;
+
+	case WM_EXITSIZEMOVE:
+		gResizing = false;
+		OnResize();
+		break;
+
+	case WM_MENUCHAR:
+		return MAKELRESULT(0, MNC_CLOSE);
+		break;
+
+	case WM_GETMINMAXINFO:
+		((MINMAXINFO*)(lParam))->ptMinTrackSize.x = 640;
+		((MINMAXINFO*)(lParam))->ptMinTrackSize.y = 480;
+		break;
+
 	case WM_CLOSE:
 		DestroyWindow(hwnd);
 		break;
+
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
+
+	case WM_ERASEBKGND:
+		break;
+
 	default:
 		return DefWindowProc(hwnd, message, wParam, lParam);
 	}
+
 	return 0;
 }
 
+
 void InitD3D()
 {
-
 	DXGI_SWAP_CHAIN_DESC scd; //DESC 설명한다
 	ZeroMemory(&scd, sizeof(DXGI_SWAP_CHAIN_DESC));
 	scd.BufferCount = 1;
 	scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	scd.BufferDesc.Width = gScreenWidth;
+	scd.BufferDesc.Height = gScreenHeight;
 	scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	scd.OutputWindow = gHwnd;
 	scd.SampleDesc.Count = 1;
 	scd.Windowed = TRUE;
+	scd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
 	D3D11CreateDeviceAndSwapChain(
 		NULL,
@@ -160,6 +263,31 @@ void InitD3D()
 		gspDeviceContext.ReleaseAndGetAddressOf()
 	);
 
+	OnResize();
+}
+
+void OnResize()
+{
+	//안전장치
+	ID3D11RenderTargetView* nullViews[] = { nullptr };
+	gspDeviceContext->OMSetRenderTargets(1, nullViews, nullptr);
+
+	gspRenderTargetView.Reset();
+	gspRenderTarget.Reset();
+	gspDepthStencilView.Reset();
+	gspDepthStencil.Reset();
+
+	gspDeviceContext->Flush();
+
+	//SwapChain 수정
+	gspSwapChain->ResizeBuffers(
+		0,
+		gScreenWidth,
+		gScreenHeight,
+		DXGI_FORMAT_UNKNOWN,
+		0
+	);
+
 	//RenderTarget
 	gspSwapChain->GetBuffer(0, IID_PPV_ARGS(gspRenderTarget.ReleaseAndGetAddressOf())); //Textur 2D연결 
 	gspDevice->CreateRenderTargetView(
@@ -171,8 +299,8 @@ void InitD3D()
 	//DepthStencil
 	CD3D11_TEXTURE2D_DESC td(
 		DXGI_FORMAT_D24_UNORM_S8_UINT,//깊이 24비트, 스텐실 8비트
-		WINDOW_WIDTH,
-		WINDOW_HEIGHT,
+		gScreenWidth,
+		gScreenHeight,
 		1,
 		1,
 		D3D11_BIND_DEPTH_STENCIL
@@ -187,10 +315,30 @@ void InitD3D()
 		&dsvd,
 		gspDepthStencilView.ReleaseAndGetAddressOf()
 	);
+
+	//조립
+	//Output Merger
+	gspDeviceContext->OMSetRenderTargets(
+		1,
+		gspRenderTargetView.GetAddressOf(),
+		gspDepthStencilView.Get()
+	);
+
+	//뷰포트
+	CD3D11_VIEWPORT viewport(0.0f, 0.0f, (float)gScreenWidth, (float)gScreenHeight);
+	//Rasterizer Stage
+	gspDeviceContext->RSSetViewports(1, &viewport);
 }
 
 void DestroyD3D()
 {
+	gspSwapChain->SetFullscreenState(false, NULL);
+
+	gspDepthStencilView.Reset();
+	gspDepthStencil.Reset();
+	gspRenderTargetView.Reset();
+	gspRenderTarget.Reset();
+
 	gspSwapChain.Reset();
 	gspDevice.Reset();
 	gspDeviceContext.Reset();
@@ -198,3 +346,29 @@ void DestroyD3D()
 	DestroyWindow(gHwnd);
 	UnregisterClass(CLASS_NAME, gInstance);
 }
+
+void Render()
+{
+	float bkgColor[]{0.0f, 0.2f, 0.4f, 1.0f};
+
+	gspDeviceContext->ClearRenderTargetView(gspRenderTargetView.Get(), bkgColor);
+	gspDeviceContext->ClearDepthStencilView(
+		gspDepthStencilView.Get(),
+		D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
+		1.0f,
+		0
+	);
+
+	//그리기
+
+
+
+	gspSwapChain->Present(0, 0);
+}
+
+
+
+//DirectX
+//	전체화면
+// 
+//
